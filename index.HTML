@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HỨNG LỘC ĐẦU XUÂN 2026</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.sound.min.js"></script>
+    <script src="https://unpkg.com/ml5@0.12.2/dist/ml5.min.js"></script>
+    <style>
+        body { margin: 0; background: #4e0000; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;}
+        #canvas-holder { width: 100vw; height: 100vh; position: relative; display: flex; justify-content: center; align-items: center; }
+        #intro-panel { position: absolute; background: rgba(0,0,0,0.92); color: white; width: 85%; max-width: 550px; padding: 25px; border: 4px solid #FFD700; border-radius: 20px; text-align: center; z-index: 100; box-sizing: border-box; }
+        #intro-text { height: 200px; overflow: hidden; position: relative; margin: 20px 0; border-top: 1px solid #555; border-bottom: 1px solid #555;}
+        .scrolling-text { position: absolute; width: 100%; animation: scrollUp 25s linear infinite; line-height: 1.6; left:0; }
+        @keyframes scrollUp { 0% { top: 100%; } 100% { top: -200%; } }
+        #btnStart { padding: 18px 45px; font-size: 24px; background: linear-gradient(#FFD700, #FFA500); border: none; cursor: pointer; border-radius: 50px; font-weight: bold; color: #4e0000; box-shadow: 0 5px 15px rgba(0,0,0,0.4); display: none; }
+        #loading-msg { color: #FFD700; font-weight: bold; margin-bottom: 10px; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div id="canvas-holder">
+        <div id="intro-panel">
+            <div id="loading-msg">🏮 ĐANG TRIỆU HỒI THẦN TÀI...</div>
+            <h2 style="color: #FFD700; margin-top:0;">HỨNG LỘC ĐẦU XUÂN 2026</h2>
+            <div id="intro-text">
+                <div class="scrolling-text">
+                    <p>HAM CHƠI EDUCATION xin chúc bạn năm mới thật nhiều Tài Lộc!</p>
+                    <p>✨ Hãy dùng lòng bàn tay để hứng Bao Lì Xì (+10đ) và Thỏi Vàng (+50đ).</p>
+                    <p>⚠️ Đừng hứng Pháo, vì nổ đau tay!</p>
+                    <p>💪 Giữa những đợt hứng lộc, bạn cần tích lũy năng lượng bằng cách đưa hai tay qua đầu và quẩy thật sung.</p>
+                    <p>🏆 Bạn có 1 phút 30 giây để TÍCH LỘC.</p>
+                    <p>Chúc bạn một năm mới Vạn Sự Như Ý!</p>
+                </div>
+            </div>
+            <button id="btnStart" onclick="startGame()">KHAI XUÂN ĐÓN LỘC</button>
+        </div>
+    </div>
+
+<script>
+let video, poseNet, poses = [];
+let items = [];
+let gameState = "WAITING"; 
+let score = 0, timer = 90;
+let challengeProgress = 0;
+let lastLPalmX = 0, lastRPalmX = 0;
+let challengeDone1 = false;
+let challengeDone2 = false;
+
+let scoreText = "", scoreTimer = 0;
+let luckyText = "", luckyTimer = 0;
+
+let bgm, bgmReady = false;
+const luckyPhrases = ["ĐẠI CÁT ĐẠI LỢI!", "VẠN SỰ HANH THÔNG!", "TẤN TÀI TẤN LỘC!", "AN KHANG HẠNH PHÚC!", "VẠN SỰ CÁT TƯỜNG!", "TÌNH DUYÊN SON SẮT", "SỨC KHỎE VÔ BIÊN!"];
+
+function preload() {
+    bgm = loadSound('DDSX.mp3', () => { bgmReady = true; }, (err) => { bgmReady = false; });
+}
+
+function setup() {
+    let cnv = createCanvas(windowWidth, windowHeight);
+    cnv.parent('canvas-holder');
+    video = createCapture(VIDEO);
+    video.size(640, 480);
+    video.elt.setAttribute('playsinline', '');
+    video.hide();
+
+    poseNet = ml5.poseNet(video, () => {
+        document.getElementById('loading-msg').innerText = "✅ THẦN TÀI ĐÃ SẴN SÀNG!";
+        document.getElementById('btnStart').style.display = 'inline-block';
+    });
+    poseNet.on('pose', (results) => { poses = results; });
+    textAlign(CENTER);
+}
+
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+
+function startGame() {
+    userStartAudio();
+    if (bgmReady && bgm.isLoaded()) { bgm.play(); bgm.setVolume(0.4); }
+    document.getElementById('intro-panel').style.display = 'none';
+    score = 0; timer = 90; gameState = "PLAYING";
+    challengeDone1 = false; challengeDone2 = false;
+    items = [];
+    for(let i=0; i<8; i++) items.push(new Item());
+}
+
+// Hàm tính toán vị trí Lòng bàn tay từ Cổ tay và Khuỷu tay
+function getPalmCenter(wrist, elbow) {
+    if (wrist.confidence < 0.2 || elbow.confidence < 0.2) return null;
+    // Tính toán vector từ khuỷu tay đến cổ tay
+    let dx = wrist.x - elbow.x;
+    let dy = wrist.y - elbow.y;
+    
+    return { x: wrist.x + dx * 0.25, y: wrist.y + dy * 0.25 };
+}
+
+function draw() {
+    push();
+    translate(width, 0); scale(-1, 1);
+    image(video, 0, 0, width, height);
+    fill(139, 0, 0, 120); rect(0, 0, width, height);
+    pop();
+
+    if (gameState === "PLAYING") {
+        handleGameplay();
+    } else if (gameState === "CHALLENGE") {
+        handleChallenge();
+    } else if (gameState === "GAMEOVER") {
+        drawGameOver();
+    }
+    drawUI();
+}
+
+function handleGameplay() {
+    // Chỉ giảm timer khi đang hứng lộc (Play mode)
+    if (frameCount % 60 == 0 && timer > 0) timer--;
+
+    // Mốc vận công 1: sau 30s nhạc (timer còn 60)
+    if (timer === 60 && !challengeDone1) {
+        gameState = "CHALLENGE";
+        challengeProgress = 0;
+        return;
+    }
+    // Mốc vận công 2: sau 60s nhạc (timer còn 30)
+    if (timer === 30 && !challengeDone2) {
+        gameState = "CHALLENGE";
+        challengeProgress = 0;
+        return;
+    }
+
+    if (timer <= 0) { 
+        gameState = "GAMEOVER"; 
+        if(bgmReady && bgm.isPlaying()) bgm.stop(); 
+    }
+
+    for (let i = items.length - 1; i >= 0; i--) {
+        items[i].update();
+        items[i].display();
+        if (poses.length > 0) {
+            let p = poses[0].pose;
+            let lp = getPalmCenter(p.leftWrist, p.leftElbow);
+            let rp = getPalmCenter(p.rightWrist, p.rightElbow);
+            if (lp) { checkCollision(lp, items[i], i); drawHandIndicator(lp); }
+            if (rp) { checkCollision(rp, items[i], i); drawHandIndicator(rp); }
+        }
+        if (items[i] && items[i].y > height) { items.splice(i, 1); items.push(new Item()); }
+    }
+}
+
+function handleChallenge() {
+    // KHÔNG giảm timer ở đây để đồng bộ với nhạc
+    fill(0, 220); rect(0, 0, width, height);
+    fill("#FFD700"); textSize(width * 0.05); textStyle(BOLD);
+    text("⚡ VẬN CÔNG CHIÊU TÀI ⚡", width/2, height/2 - 80);
+    fill(255); textSize(width * 0.02); 
+    text("HUƠ TAY QUA ĐẦU VÀ QUẨY THẬT SUNG!", width/2, height/2 - 30);
+
+    let barWidth = width * 0.6;
+    fill(50); rect(width/2 - barWidth/2, height/2 + 20, barWidth, 40, 20);
+    fill(0, 255, 0); rect(width/2 - barWidth/2, height/2 + 20, (challengeProgress/100) * barWidth, 40, 20);
+
+    if (poses.length > 0) {
+        let p = poses[0].pose;
+        let lp = getPalmCenter(p.leftWrist, p.leftElbow);
+        let rp = getPalmCenter(p.rightWrist, p.rightElbow);
+        if (p.leftWrist.y < p.leftShoulder.y || p.rightWrist.y < p.rightShoulder.y) {
+            let move = (lp ? abs(lp.x - lastLPalmX) : 0) + (rp ? abs(rp.x - lastRPalmX) : 0);
+            if (move > 15) challengeProgress += 0.8;
+        }
+        if (lp) lastLPalmX = lp.x; if (rp) lastRPalmX = rp.x;
+    }
+
+    if (challengeProgress >= 100) {
+        score += 100;
+        gameState = "PLAYING";
+        luckyText = random(luckyPhrases);
+        luckyTimer = 120;
+        challengeProgress = 0;
+        // Đánh dấu đã xong thử thách ở mốc thời gian này
+        if (timer > 45) challengeDone1 = true;
+        else challengeDone2 = true;
+    }
+}
+
+function checkCollision(palm, item, index) {
+    let wx = map(palm.x, 0, 640, width, 0); 
+    let wy = map(palm.y, 0, 480, 0, height);
+    if (dist(wx, wy, item.x, item.y) < 85) { // Tăng nhẹ bán kính va chạm cho lòng bàn tay
+        score = max(0, score + item.points);
+        if (item.points === 50) { luckyText = random(luckyPhrases); luckyTimer = 90; }
+        scoreText = (item.points > 0 ? "+" : "") + item.points;
+        scoreTimer = 30;
+        items.splice(index, 1); items.push(new Item());
+    }
+}
+
+function drawHandIndicator(palm) {
+    let wx = map(palm.x, 0, 640, width, 0);
+    let wy = map(palm.y, 0, 480, 0, height);
+    fill(255, 215, 0, 150); noStroke();
+    circle(wx, wy, 90); // Vòng tròn to hơn một chút cho lòng bàn tay
+    textSize(80); text("👐", wx, wy + 15);
+}
+
+function drawUI() {
+    fill("#FFD700"); textSize(30); textAlign(LEFT); textStyle(BOLD);
+    text("🧧 LỘC: " + score, 40, 60);
+    fill(255); text("⏱️ " + timer + "s", 40, 100);
+    textAlign(CENTER);
+    if (scoreTimer > 0) {
+        textSize(width * 0.04); fill(255, 255, 0, scoreTimer * 8);
+        text(scoreText, width/2, height/2 + 100);
+        scoreTimer--;
+    }
+    if (luckyTimer > 0) {
+        textSize(width * 0.05); fill(255, 215, 0, luckyTimer * 5);
+        text(luckyText, width/2, height/2);
+        luckyTimer--;
+    }
+}
+
+function drawGameOver() {
+    fill(0, 240); rect(0, 0, width, height);
+    fill("#FFD700"); textSize(width * 0.04); text("TÂN NIÊN SUNG TÚC - MÃ ĐÁO THÀNH CÔNG", width/2, height/2 - 40);
+    fill(255); textSize(35); text("Lộc xuân tích lũy của bạn là: " + score, width/2, height/2 + 30);
+    textSize(22); text("Nhấn F5 để chơi lại", width/2, height/2 + 100);
+}
+
+class Item {
+    constructor() { this.reset(); }
+    reset() {
+        this.x = random(80, width - 80);
+        this.y = random(-height, -100);
+        // Tốc độ rơi nhanh dần khi nhạc về cuối
+        this.speed = (timer < 25) ? random(12, 18) : (timer < 50 ? random(7, 11) : random(4, 8));
+        let r = random();
+        if (r < 0.25) { this.icon = "💰"; this.points = 50; }
+        else if (r < 0.4) { this.icon = "🧨"; this.points = -30; }
+        else { this.icon = "🧧"; this.points = 10; }
+    }
+    update() { this.y += this.speed; }
+    display() { textSize(60); text(this.icon, this.x, this.y); }
+}
+</script>
+</body>
+</html>
