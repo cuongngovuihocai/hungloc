@@ -10,20 +10,7 @@
     <style>
         body { margin: 0; background: #4e0000; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;}
         #canvas-holder { width: 100vw; height: 100vh; position: relative; display: flex; justify-content: center; align-items: center; }
-        #intro-panel {
-    position: absolute;
-    background: rgba(0,0,0,0.7); /* Giảm từ 0.92 xuống 0.7 để thấy lờ mờ hình 2.png phía sau */
-    color: white;
-    width: 85%;
-    max-width: 550px;
-    padding: 25px;
-    border: 4px solid #FFD700;
-    border-radius: 20px;
-    text-align: center;
-    z-index: 100;
-    box-sizing: border-box;
-    backdrop-filter: blur(5px); /* Thêm hiệu ứng làm mờ kính cực kỳ sang trọng */
-}
+        #intro-panel { position: absolute; background: rgba(0,0,0,0.85); color: white; width: 85%; max-width: 550px; padding: 25px; border: 4px solid #FFD700; border-radius: 20px; text-align: center; z-index: 100; box-sizing: border-box; backdrop-filter: blur(5px); }
         #intro-text { height: 200px; overflow: hidden; position: relative; margin: 20px 0; border-top: 1px solid #555; border-bottom: 1px solid #555;}
         .scrolling-text { position: absolute; width: 100%; animation: scrollUp 25s linear infinite; line-height: 1.6; left:0; }
         @keyframes scrollUp { 0% { top: 100%; } 100% { top: -200%; } }
@@ -57,6 +44,7 @@ let gameState = "WAITING";
 let bgm, endImg, startImg, maskImg;
 let bgmReady = false;
 let score = 0, timer = 90;
+let lastTimerUpdate = 0; // Biến để theo dõi thời gian thực
 let challengeProgress = 0;
 let lastLPalmX = 0, lastRPalmX = 0;
 let challengeDone1 = false;
@@ -82,7 +70,12 @@ function setup() {
     video.elt.setAttribute('playsinline', '');
     video.hide();
 
-    poseNet = ml5.poseNet(video, () => {
+    // TỐI ƯU: Cấu hình PoseNet chạy nhanh hơn (DetectionType: single)
+    poseNet = ml5.poseNet(video, {
+        architecture: 'MobileNetV1',
+        detectionType: 'single', 
+        flipHorizontal: false 
+    }, () => {
         document.getElementById('loading-msg').innerText = "✅ THẦN TÀI ĐÃ SẴN SÀNG!";
         document.getElementById('btnStart').style.display = 'inline-block';
     });
@@ -96,7 +89,9 @@ function startGame() {
     userStartAudio();
     if (bgmReady && bgm.isLoaded()) { bgm.loop(); bgm.setVolume(0.4); }
     document.getElementById('intro-panel').style.display = 'none';
-    score = 0; timer = 90; gameState = "PLAYING";
+    score = 0; timer = 90; 
+    lastTimerUpdate = millis(); // Khởi tạo mốc thời gian
+    gameState = "PLAYING";
     challengeDone1 = false; challengeDone2 = false;
     items = [];
     for(let i=0; i<8; i++) items.push(new Item());
@@ -104,62 +99,55 @@ function startGame() {
 
 function getPalmCenter(wrist, elbow) {
     if (wrist.confidence < 0.2 || elbow.confidence < 0.2) return null;
-    
-    // Tính toán vector từ khuỷu tay đến cổ tay
     let dx = wrist.x - elbow.x;
     let dy = wrist.y - elbow.y;
-    
-    // Kéo dài vector thêm 25% để tìm lòng bàn tay
-    let palmX = wrist.x + dx * 0.3;
-    let palmY = wrist.y + dy * 0.3;
-    
-    return { x: palmX, y: palmY };
+    return { x: wrist.x + dx * 0.3, y: wrist.y + dy * 0.3 };
 }
 
-
 function draw() {
-        // 1. Vẽ Camera (Dưới cùng)
+    // 1. Vẽ Camera & Lớp phủ
     push();
     translate(width, 0); scale(-1, 1);
     image(video, 0, 0, width, height);
     
-    // --- LỚP PHỦ RIÊNG TƯ (CHỈ HIỆN KHI ĐANG CHƠI HOẶC VẬN CÔNG) ---
     if (gameState === "PLAYING" || gameState === "CHALLENGE") {
-        
-        // BƯỚC A: Phủ một lớp màu đỏ thẫm để làm tối và mờ các chi tiết phòng
-        // (Số 210 giúp che khoảng 80-90% đồ đạc trong phòng)
-        fill(80, 0, 0, 210); 
+        fill(80, 0, 0, 200); 
         rect(0, 0, width, height);
-
-        // BƯỚC B: Phủ hình 3.png lên để làm họa tiết trang trí che background
         if (maskImg) {
-            tint(255, 120); // Độ hiển thị của 3.png (120/255)
+            tint(255, 100); 
             image(maskImg, 0, 0, width, height);
             noTint();
         }
     }
     pop();
-    // 2. Kiểm tra trạng thái Game
+
+    // 2. Logic Trạng thái Game
     if (gameState === "WAITING") {
-        // Vẽ hình nền 2.png chèn lên trên camera trong lúc chờ
-        if (startImg) {
-            image(startImg, 0, 0, width, height);
-        }
+        if (startImg) image(startImg, 0, 0, width, height);
     } else if (gameState === "PLAYING") {
+        updateTimer(); // Cập nhật thời gian thực
         handleGameplay();
     } else if (gameState === "CHALLENGE") {
+        // Trong khi vận công cũng cần đếm timer nếu bạn muốn bài nhạc khớp
+        // Nếu muốn dừng timer lúc vận công như yêu cầu trước thì bỏ updateTimer() ở đây
         handleChallenge();
     } else if (gameState === "GAMEOVER") {
         drawGameOver();
     }
     
-    // Luôn vẽ UI (điểm, thời gian) ở trên cùng
     drawUI();
 }
 
-function handleGameplay() {
-    if (frameCount % 60 == 0 && timer > 0) timer--;
+// TỐI ƯU: Hàm đếm giây chuẩn xác theo thời gian thực
+function updateTimer() {
+    if (millis() - lastTimerUpdate >= 1000) {
+        if (timer > 0) timer--;
+        lastTimerUpdate = millis();
+    }
+}
 
+function handleGameplay() {
+    // Mốc vận công
     if (timer === 60 && !challengeDone1) {
         gameState = "CHALLENGE";
         challengeProgress = 0;
@@ -176,6 +164,7 @@ function handleGameplay() {
         if(bgmReady && bgm.isPlaying()) bgm.stop(); 
     }
 
+    // Xử lý vật phẩm
     for (let i = items.length - 1; i >= 0; i--) {
         items[i].update();
         items[i].display();
@@ -203,18 +192,18 @@ function handleChallenge() {
 
     if (poses.length > 0) {
         let p = poses[0].pose;
-        let lp = getPalmCenter(p.leftWrist, p.leftElbow);
-        let rp = getPalmCenter(p.rightWrist, p.rightElbow);
         if (p.leftWrist.y < p.leftShoulder.y || p.rightWrist.y < p.rightShoulder.y) {
-            let move = (lp ? abs(lp.x - lastLPalmX) : 0) + (rp ? abs(rp.x - lastRPalmX) : 0);
-            if (move > 15) challengeProgress += 0.8;
+            let move = (p.leftWrist.confidence > 0.2 ? abs(p.leftWrist.x - lastLPalmX) : 0) + 
+                       (p.rightWrist.confidence > 0.2 ? abs(p.rightWrist.x - lastRPalmX) : 0);
+            if (move > 10) challengeProgress += 0.9;
         }
-        if (lp) lastLPalmX = lp.x; if (rp) lastRPalmX = rp.x;
+        lastLPalmX = p.leftWrist.x; lastRPalmX = p.rightWrist.x;
     }
 
     if (challengeProgress >= 100) {
         score += 100;
         gameState = "PLAYING";
+        lastTimerUpdate = millis(); // Reset mốc thời gian để giây sau chạy đủ 1s
         luckyText = random(luckyPhrases);
         luckyTimer = 120;
         challengeProgress = 0;
@@ -239,8 +228,8 @@ function drawHandIndicator(palm) {
     let wx = map(palm.x, 0, 640, width, 0);
     let wy = map(palm.y, 0, 480, 0, height);
     fill(255, 215, 0, 150); noStroke();
-    circle(wx, wy, 90); 
-    textSize(80); text("👐", wx, wy + 15);
+    circle(wx, wy, 70); 
+    textSize(50); text("👐", wx, wy + 15);
 }
 
 function drawUI() {
@@ -263,7 +252,6 @@ function drawUI() {
 function drawGameOver() {
     push();
     if (endImg) {
-        // Tối ưu để ảnh 1.png luôn phủ kín màn hình
         let imgRatio = endImg.width / endImg.height;
         let canvasRatio = width / height;
         if (canvasRatio > imgRatio) {
@@ -275,16 +263,12 @@ function drawGameOver() {
         fill(0, 240); rect(0, 0, width, height);
     }
     pop();
-
     fill(0, 150); rect(0, 0, width, height);
-
     fill("#FFD700"); textStyle(BOLD);
     textSize(width * 0.04); 
     text("TÂN NIÊN SUNG TÚC - MÃ ĐÁO THÀNH CÔNG", width/2, height/2 - 40);
-    
     fill(255); textSize(width * 0.03); 
     text("Lộc xuân tích lũy: " + score, width/2, height/2 + 30);
-    
     textSize(width * 0.015); 
     text("Nhấn F5 để nhận lộc lại từ đầu", width/2, height/2 + 100);
 }
@@ -294,7 +278,7 @@ class Item {
     reset() {
         this.x = random(80, width - 80);
         this.y = random(-height, -100);
-        this.speed = (timer < 25) ? random(12, 18) : (timer < 50 ? random(7, 11) : random(4, 8));
+        this.speed = (timer < 25) ? random(10, 16) : (timer < 50 ? random(7, 11) : random(4, 8));
         let r = random();
         if (r < 0.25) { this.icon = "💰"; this.points = 50; }
         else if (r < 0.4) { this.icon = "🧨"; this.points = -30; }
@@ -306,6 +290,3 @@ class Item {
 </script>
 </body>
 </html>
-
-
-
