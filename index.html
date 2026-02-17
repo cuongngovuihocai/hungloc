@@ -117,13 +117,25 @@ function getPalmCenter(wrist, elbow) {
 
 
 function draw() {
-    // 1. Vẽ Video Mirror (Nền dưới cùng)
+        // 1. Vẽ Camera (Dưới cùng)
     push();
     translate(width, 0); scale(-1, 1);
     image(video, 0, 0, width, height);
-    fill(139, 0, 0, 120); rect(0, 0, width, height);
-    pop();
+    
+    // --- LỚP PHỦ CHE BACKGROUND ---
+    
+    // BƯỚC A: Phủ màu đỏ đậm để che chi tiết phòng (độ đậm 210/255 - che rất kỹ)
+    // Bạn có thể chỉnh số 210 này: thấp hơn (ví dụ 150) nếu muốn nhìn rõ người hơn.
+    fill(100, 0, 0, 210); 
+    rect(0, 0, width, height);
 
+    // BƯỚC B: Phủ hình nền 2.png lên với độ mờ nhẹ để tạo họa tiết Tết che phòng
+    if (startImg) {
+        tint(255, 80); // 80/255 là độ hiển thị của hình 2.png
+        image(startImg, 0, 0, width, height);
+        noTint();
+    }
+    pop();
     // 2. Kiểm tra trạng thái Game
     if (gameState === "WAITING") {
         // Vẽ hình nền 2.png chèn lên trên camera trong lúc chờ
@@ -291,3 +303,4 @@ class Item {
 </script>
 </body>
 </html>
+
